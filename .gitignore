@@ -12,3 +12,6 @@ wheels/
 # Jupyter
 .ipynb_checkpoints
 *.ipynb
+
+# Sensitive data
+.env

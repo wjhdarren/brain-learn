@@ -9,10 +9,10 @@ class Program:
         self,
         max_depth : int,
         max_operators : int,
-        metric : callable,
         random_state : RandomState,
+        metric : callable,
         parimony_coefficient : float = 0.1,
-        p_point_replace : float = 0.2,
+        p_point_replace : float = 0.1,
         program : list[Operator | Terminal] = None,
         skip_validation : bool = False, # for debug usage
     ):
@@ -318,7 +318,13 @@ class Program:
 
     def raw_fitness(self):
         fast_expr = self.__str__()
-        return self.metric(fast_expr)
+        try:
+            sharpe = self.metric(fast_expr)['sharpe']
+            if sharpe is None:
+                return float('-inf')
+            return sharpe
+        except Exception:
+            return float('-inf')
 
     def fitness(self):
         penalty = self.parimony_coefficient * len(self.program) 

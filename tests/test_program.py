@@ -88,8 +88,12 @@ def test_str_method():
     ]
     
     # Create Program instance with the test program
-    p = Program(arities={}, max_depth=3, metric=lambda x: 0, 
-               parimony_coefficient=0.1, random_state=None, program=program)
+    p = Program(max_depth=3, 
+               max_operators=5,
+               metric=lambda x: 0, 
+               parimony_coefficient=0.1, 
+               random_state=None, 
+               program=program)
     
     # Get the string representation
     result = str(p)
@@ -115,8 +119,12 @@ def test_str_method():
         ADD,      # Add operation ((open / close) + (high * low))
     ]
     
-    p2 = Program(arities={}, max_depth=3, metric=lambda x: 0,
-                parimony_coefficient=0.1, random_state=None, program=complex_program)
+    p2 = Program(max_depth=3,
+                max_operators=5,
+                metric=lambda x: 0,
+                parimony_coefficient=0.1, 
+                random_state=None, 
+                program=complex_program)
     
     result2 = str(p2)
     expected2 = "add(divide(open,close),multiply(high,low))"
@@ -130,8 +138,12 @@ def test_str_method():
     print(visualize_program(complex_program))
     
     # Test empty program
-    empty_program = Program(arities={}, max_depth=3, metric=lambda x: 0,
-                           parimony_coefficient=0.1, random_state=None, program=[])
+    empty_program = Program(max_depth=3,
+                           max_operators=5,
+                           metric=lambda x: 0,
+                           parimony_coefficient=0.1, 
+                           random_state=None, 
+                           program=[])
     result3 = str(empty_program)
     expected3 = "EmptyProgram"
     
@@ -151,8 +163,12 @@ def test_str_method():
         RANK
     ]
     
-    p4 = Program(arities={}, max_depth=3, metric=lambda x: 0,
-                parimony_coefficient=0.1, random_state=None, program=nested_program)
+    p4 = Program(max_depth=3,
+                max_operators=5,
+                metric=lambda x: 0,
+                parimony_coefficient=0.1, 
+                random_state=None, 
+                program=nested_program)
     
     result4 = str(p4)
     expected4 = "rank(sqrt(multiply(open,close)))"
