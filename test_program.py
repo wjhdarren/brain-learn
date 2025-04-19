@@ -1,7 +1,6 @@
 from src.program import Program
-from src.function import ADD, MAX, INV, SQRT, OPEN, CLOSE, HIGH, LOW, VOLUME, RET, ADV, Operator, Terminal
+from src.function import ADD, MAX, OPEN, CLOSE, VOLUME, ADV
 from numpy.random import RandomState
-import numpy as np
 
 # Define a simple metric function
 def simple_metric(expr):

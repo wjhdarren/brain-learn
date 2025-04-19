@@ -148,7 +148,7 @@ def test_str_method():
     expected3 = "EmptyProgram"
     
     print("\nTest case 3 (Empty Program):")
-    print(f"Program: []")
+    print("Program: []")
     print(f"Result:   {result3}")
     print(f"Expected: {expected3}")
     print(f"Test passed: {result3 == expected3}")

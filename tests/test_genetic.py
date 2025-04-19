@@ -2,7 +2,7 @@ import unittest
 import numpy as np
 from src.genetic import GPLearnSimulator
 from src.program import Program
-from src.function import Terminal, Operator, ADD, SUB, MUL, DIV, OPEN, CLOSE, HIGH, LOW, VWAP, VOLUME
+from src.function import ADD, MUL, DIV, OPEN, CLOSE, VOLUME
 
 def dummy_metric(expr):
     """A dummy metric function that returns a simple score based on expression complexity.

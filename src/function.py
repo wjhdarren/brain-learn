@@ -1,4 +1,3 @@
-from enum import Enum
 from sympy import Integer as Int 
 import sympy as sp
 from src.utils import *

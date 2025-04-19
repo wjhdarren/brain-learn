@@ -1,5 +1,4 @@
 from src.function import * # noqa: F403
-from sympy import Integer as Int 
 import numpy as np
 from numpy.random import RandomState
 from copy import deepcopy

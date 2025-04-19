@@ -2,7 +2,6 @@ import unittest
 import numpy as np
 import time
 from src.genetic import GPLearnSimulator
-from src.program import Program
 
 class RealisticMetric:
     """A more realistic metric function for simulating a financial alpha factor.
@@ -132,7 +131,7 @@ class TestIntegration(unittest.TestCase):
         
         # Check metric performance
         metric_stats = metric.get_stats()
-        print(f"\nMetric stats:")
+        print("\nMetric stats:")
         print(f"Total calls: {metric_stats['calls']}")
         print(f"Average evaluation time: {metric_stats['avg_time']:.6f} seconds")
         print(f"Total evaluation time: {metric_stats['total_time']:.2f} seconds")

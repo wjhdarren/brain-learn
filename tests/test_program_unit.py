@@ -1,7 +1,7 @@
 import unittest
 import numpy as np
 from sympy import Integer as Int
-from src.function import Terminal, Operator, ADD, SUB, MUL, DIV, OPEN, CLOSE, HIGH, LOW, VOLUME
+from src.function import Operator, ADD, SUB, MUL, DIV, OPEN, HIGH, LOW, VOLUME
 from src.program import Program
 
 
