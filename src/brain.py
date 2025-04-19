@@ -49,6 +49,13 @@ def simulate(s : requests.Session, fast_expr : str, timeout = 300) -> dict | Non
     },
     'regular': fast_expr }
     simulation_response = s.post('https://api.worldquantbrain.com/simulations', json=simulation_data)
+    
+    # Check for authentication failures (401 status code)
+    if simulation_response.status_code == 401:
+        print("Authentication error: Incorrect credentials.")
+        print("Response:", simulation_response.text)
+        return None
+    
     if simulation_response.status_code == 201:
         print("Simulation sent successfully.")
         simulation_progress_url = simulation_response.headers['Location']
@@ -57,6 +64,12 @@ def simulate(s : requests.Session, fast_expr : str, timeout = 300) -> dict | Non
         
         while not finished and total_wait_time < timeout:
             simulation_progress = s.get(simulation_progress_url)
+            
+            # Check for authentication failures during progress monitoring
+            if simulation_progress.status_code == 401:
+                print("Authentication error during simulation progress monitoring.")
+                print("Response:", simulation_progress.text)
+                return None
             
             # Check if simulation is complete
             if simulation_progress.headers.get("Retry-After", 0) == 0:
@@ -79,7 +92,11 @@ def simulate(s : requests.Session, fast_expr : str, timeout = 300) -> dict | Non
         if finished:
             try:
                 alpha_id = simulation_progress.json()["alpha"] 
-                return get_alpha_performance(s, alpha_id)
+                alpha_performance = get_alpha_performance(s, alpha_id)
+                # Check if we got a valid result
+                if alpha_performance and 'sharpe' in alpha_performance:
+                    return alpha_performance
+                return None
             except Exception as e:
                 print(f"Error processing completed simulation: {e}")
                 return None
@@ -120,4 +137,4 @@ def get_alpha_history(s : requests.Session, pandas = True):
         }
         alpha_list.append(data)
         
-        return pd.DataFrame(alpha_list) if pandas else alpha_list
+    return pd.DataFrame(alpha_list) if pandas else alpha_list

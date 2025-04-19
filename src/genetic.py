@@ -1,10 +1,13 @@
 import requests
 import numpy as np
 import time
+import os
 from src.utils import evaluate_fitness
 from datetime import timedelta
 from src.program import Program
 
+# Maximum number of reconnection attempts
+MAX_RECONNECTION_ATTEMPTS = 3
 
 class GPLearnSimulator:
     def __init__(self, 
@@ -63,6 +66,7 @@ class GPLearnSimulator:
         self.p_point_mutation = p_point_mutation / (p_subtree_mutation + p_hoist_mutation + p_point_mutation)
         self.max_depth = max_depth
         self.max_operators = max_operators
+        self.session = session
         self.metric = evaluate_fitness(session)
         self.parsimony_coefficient = parsimony_coefficient
         
@@ -98,23 +102,74 @@ class GPLearnSimulator:
             )
             self.population.append(program)
     
+    def _recreate_session(self):
+        """Recreate the session if authentication fails."""
+        from dotenv import load_dotenv
+        
+        # Load credentials from .env file
+        load_dotenv()
+        username = os.getenv("USERNAME")
+        password = os.getenv("PASSWORD")
+        
+        # Create a new session
+        self.session = requests.Session()
+        self.session.auth = (username, password)
+        
+        # Authenticate the session
+        response = self.session.post('https://api.worldquantbrain.com/authentication')
+        
+        if response.status_code == 201:
+            print("Session reconnected successfully.")
+            # Update the metric function with the new session
+            self.metric = evaluate_fitness(self.session)
+            return True
+        else:
+            print(f"Failed to reconnect session. Status Code: {response.status_code}")
+            print(f"Response: {response.text}")
+            return False
+    
     def _evaluate_fitness(self, program):
         """Evaluate the fitness of a program."""
         if program.fitness is None:
             # Calculate raw fitness using the Program's raw_fitness method
             fast_expr = program.__str__()
-            try:
-                sharpe = self.metric(fast_expr)['sharpe']
-                if sharpe is None:
+            
+            # Try multiple times in case of authentication failure
+            for attempt in range(MAX_RECONNECTION_ATTEMPTS):
+                try:
+                    result = self.metric(fast_expr)
+                    
+                    # Check if the result contains an error message about authentication
+                    if result is None:
+                        # Try to recreate the session
+                        if self._recreate_session():
+                            continue  # Try again with the new session
+                        else:
+                            program.raw_fitness = float('-inf')
+                            break
+                    
+                    sharpe = result.get('sharpe')
+                    if sharpe is None:
+                        program.raw_fitness = float('-inf')
+                    else:
+                        program.raw_fitness = sharpe
+                    break  # Success, exit the retry loop
+                    
+                except Exception as e:
+                    error_message = str(e)
+                    if "401" in error_message or "authentication" in error_message.lower():
+                        # Authentication error, attempt to reconnect
+                        if self._recreate_session():
+                            continue  # Try again with the new session
+                    
                     program.raw_fitness = float('-inf')
-                else:
-                    program.raw_fitness = sharpe
-            except Exception:
-                program.raw_fitness = float('-inf')
+                    if attempt == MAX_RECONNECTION_ATTEMPTS - 1:
+                        print(f"Failed to evaluate fitness after {MAX_RECONNECTION_ATTEMPTS} attempts: {e}")
                 
             # Calculate fitness with parsimony pressure
             program.fitness = program.raw_fitness - program.parimony_coefficient * len(program.program)
             self.fitness_evaluations += 1
+            
         return program.fitness
     
     def _tournament_selection(self):
