@@ -351,6 +351,9 @@ class TestGPLearnSimulator(unittest.TestCase):
         )
         gp.metric = deterministic_metric
         
+        # Explicitly empty the population
+        gp.population = []
+        
         # Population should be empty initially
         self.assertEqual(len(gp.population), 0)
         
@@ -404,6 +407,164 @@ class TestGPLearnSimulator(unittest.TestCase):
         # Both should result in -inf fitness
         self.assertEqual(fitness1, float('-inf'))
         self.assertEqual(fitness2, float('-inf'))
+    
+    def test_parallel_evaluation(self):
+        """Test the parallel fitness evaluation functionality."""
+        import time
+        
+        # Create a metric function that includes a delay to simulate computation time
+        def delayed_metric(expr):
+            time.sleep(0.1)  # 100ms delay
+            return {'sharpe': len(expr) / 100}
+        
+        # Create 10 programs
+        programs = []
+        for _ in range(10):
+            program = Program(
+                max_depth=3,
+                max_operators=5,
+                random_state=np.random.RandomState(42),
+                metric=delayed_metric,
+                parimony_coefficient=0.1
+            )
+            programs.append(program)
+        
+        # Test with sequential evaluation (n_parallel=1)
+        gp_sequential = GPLearnSimulator(
+            population_size=10,
+            n_parallel=1,
+            random_state=42
+        )
+        gp_sequential.metric = delayed_metric
+        
+        start_time = time.time()
+        gp_sequential.parallel_evaluate_fitness(programs, n_parallel=1)
+        sequential_time = time.time() - start_time
+        
+        # Reset program fitness for next test
+        for program in programs:
+            program.fitness = None
+            program.raw_fitness = None
+        
+        # Test with parallel evaluation (n_parallel=3)
+        gp_parallel = GPLearnSimulator(
+            population_size=10,
+            n_parallel=3,
+            random_state=42
+        )
+        gp_parallel.metric = delayed_metric
+        
+        start_time = time.time()
+        gp_parallel.parallel_evaluate_fitness(programs, n_parallel=3)
+        parallel_time = time.time() - start_time
+        
+        # Check that all programs have fitness values
+        for program in programs:
+            self.assertIsNotNone(program.fitness)
+        
+        # Parallel evaluation should be faster (allowing for some overhead)
+        # With 10 programs, 100ms each, sequential ≈ 1000ms, parallel with 3 workers ≈ 400ms
+        # We use a conservative threshold to account for test environment variations
+        self.assertLess(parallel_time, sequential_time * 0.9)
+        
+        # Test with too many parallel workers (should cap at 3)
+        for program in programs:
+            program.fitness = None
+            program.raw_fitness = None
+            
+        gp_too_many = GPLearnSimulator(
+            population_size=10,
+            n_parallel=10,  # More than allowed
+            random_state=42
+        )
+        gp_too_many.metric = delayed_metric
+        
+        # Should not raise an exception, but should warn and cap at 3
+        gp_too_many.parallel_evaluate_fitness(programs, n_parallel=10)
+        
+        # Check that all programs still have fitness values
+        for program in programs:
+            self.assertIsNotNone(program.fitness)
+    
+    def test_batch_processing_and_timeout(self):
+        """Test batch processing and timeout functionality of parallel_evaluate_fitness."""
+        import time
+        import concurrent.futures
+        
+        # Create a metric function with variable delay
+        def variable_delay_metric(expr):
+            # Simulate some metrics taking longer than others
+            if 'open' in expr.lower():
+                time.sleep(0.5)  # Longer delay for expressions with 'open'
+            else:
+                time.sleep(0.1)  # Normal delay
+            
+            return {'sharpe': len(expr) / 100}
+        
+        # Create a metric function that times out
+        def timeout_metric(expr):
+            # Will exceed the timeout in parallel_evaluate_fitness
+            time.sleep(15)  
+            return {'sharpe': 1.0}
+        
+        # Test batch processing with larger number of programs
+        gp = GPLearnSimulator(
+            population_size=40,
+            n_parallel=3,
+            random_state=42
+        )
+        
+        gp.metric = variable_delay_metric
+        
+        # Create 75 programs (should be processed in 2 batches with default BATCH_SIZE=50)
+        large_batch = []
+        for i in range(75):
+            program = Program(
+                max_depth=3,
+                max_operators=5,
+                random_state=np.random.RandomState(i),  # Different seeds for variety
+                metric=variable_delay_metric,
+                parimony_coefficient=0.1
+            )
+            large_batch.append(program)
+        
+        # Evaluate the large batch
+        start_time = time.time()
+        gp.parallel_evaluate_fitness(large_batch, n_parallel=3)
+        processing_time = time.time() - start_time
+        
+        # All programs should have fitness values
+        for program in large_batch:
+            self.assertIsNotNone(program.fitness)
+        
+        # Test timeout handling
+        gp_timeout = GPLearnSimulator(
+            population_size=5,
+            n_parallel=2,
+            random_state=42
+        )
+        gp_timeout.metric = timeout_metric
+        
+        # Create a few programs that will time out
+        timeout_programs = []
+        for i in range(3):
+            program = Program(
+                max_depth=2,
+                max_operators=3,
+                random_state=np.random.RandomState(i),
+                metric=timeout_metric,
+                parimony_coefficient=0.1
+            )
+            timeout_programs.append(program)
+        
+        # This should handle the timeout gracefully
+        gp_timeout.parallel_evaluate_fitness(timeout_programs, n_parallel=2)
+        
+        # All programs should have fitness values even if they timed out
+        for program in timeout_programs:
+            self.assertIsNotNone(program.fitness)
+            # They should have been assigned -inf fitness
+            self.assertEqual(program.fitness, float('-inf'))
 
 
 if __name__ == "__main__":

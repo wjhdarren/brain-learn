@@ -5,6 +5,10 @@ import os
 from src.utils import evaluate_fitness
 from datetime import timedelta
 from src.program import Program
+from itertools import batched 
+import concurrent.futures
+import threading
+import warnings
 
 # Maximum number of reconnection attempts
 MAX_RECONNECTION_ATTEMPTS = 3
@@ -23,7 +27,9 @@ class GPLearnSimulator:
                  max_operators=10,
                  session = None,
                  random_state=None,
-                 parsimony_coefficient=0.15):
+                 parsimony_coefficient=0.15,
+                 n_parallel=3,
+                 init_population=[]):
         """
         A Genetic Programming simulator optimized for simulation-based fitness evaluation.
         
@@ -55,6 +61,10 @@ class GPLearnSimulator:
             Function to evaluate fitness
         parsimony_coefficient : float
             Coefficient for parsimony pressure (penalty for size)
+        n_parallel : int, optional
+            Number of parallel workers for fitness evaluation (default is 1). Max is 3.
+        init_population : list, optional
+            List of Program objects to initialize the population with.
         """
         self.population_size = population_size
         self.generations = generations
@@ -69,6 +79,7 @@ class GPLearnSimulator:
         self.session = session
         self.metric = evaluate_fitness(session)
         self.parsimony_coefficient = parsimony_coefficient
+        self.n_parallel = n_parallel
         
         # Setup random state
         if random_state is None:
@@ -79,7 +90,7 @@ class GPLearnSimulator:
             self.random_state = random_state
             
         # Initialize tracking variables
-        self.population = []
+        self.population = init_population
         self.history = []
         self.best_program = None
         self.best_fitness = float('-inf')
@@ -88,11 +99,11 @@ class GPLearnSimulator:
         # Statistics
         self.fitness_evaluations = 0
         self.start_time = None
+        self._session_lock = threading.Lock()
         
     def _initialize_population(self):
         """Initialize a population of random programs."""
-        self.population = []
-        for _ in range(self.population_size):
+        while len(self.population) < self.population_size:
             program = Program(
                 max_depth=self.max_depth,
                 max_operators=self.max_operators,
@@ -101,6 +112,10 @@ class GPLearnSimulator:
                 parimony_coefficient=self.parsimony_coefficient
             )
             self.population.append(program)
+            if len(self.population) == self.population_size:
+                break
+        else:
+            self.population = self.random_state.choice(self.population, size=self.population_size, replace=False)
     
     def _recreate_session(self):
         """Recreate the session if authentication fails."""
@@ -128,66 +143,187 @@ class GPLearnSimulator:
             print(f"Response: {response.text}")
             return False
     
-    def _evaluate_fitness(self, program):
-        """Evaluate the fitness of a program."""
-        if program.fitness is None:
-            # Calculate raw fitness using the Program's raw_fitness method
-            fast_expr = program.__str__()
-            
-            # Try multiple times in case of authentication failure
-            for attempt in range(MAX_RECONNECTION_ATTEMPTS):
-                try:
-                    result = self.metric(fast_expr)
-                    
-                    # Check if the result contains an error message about authentication
-                    if result is None:
-                        # Try to recreate the session
-                        if self._recreate_session():
-                            continue  # Try again with the new session
-                        else:
-                            program.raw_fitness = float('-inf')
-                            break
-                    
-                    sharpe = result.get('sharpe')
-                    if sharpe is None:
-                        program.raw_fitness = float('-inf')
+    def _evaluate_single_program(self, program):
+        """
+        Evaluate the fitness of a single program, handling retries and session recreation.
+
+        Returns
+        -------
+        tuple
+            (raw_fitness, fitness, needs_evaluation_increment)
+        """
+        if program.fitness is not None:
+            # Already evaluated
+            return program.raw_fitness, program.fitness, False
+
+        needs_evaluation_increment = True
+        fast_expr = program.__str__()
+        raw_fitness = float('-inf')
+
+        for attempt in range(MAX_RECONNECTION_ATTEMPTS):
+            try:
+                result = self.metric(fast_expr)
+
+                if result is None:
+                    # Authentication likely failed, try to recreate session
+                    recreated = False
+                    with self._session_lock: # Ensure only one thread recreates session
+                        # Double check if another thread already recreated it while waiting for the lock
+                        try:
+                            test_response = self.session.get('https://api.worldquantbrain.com/authentication') # A lightweight check
+                            if test_response.status_code != 200:
+                                recreated = self._recreate_session()
+                            else: # Session seems okay now
+                                recreated = True # Act as if recreated to retry metric call
+                        except requests.exceptions.RequestException:
+                             recreated = self._recreate_session() # Error during check, try recreating
+
+                    if recreated:
+                        continue # Retry metric call with potentially new session
                     else:
-                        program.raw_fitness = sharpe
-                    break  # Success, exit the retry loop
-                    
-                except Exception as e:
-                    error_message = str(e)
-                    if "401" in error_message or "authentication" in error_message.lower():
-                        # Authentication error, attempt to reconnect
-                        if self._recreate_session():
-                            continue  # Try again with the new session
-                    
-                    program.raw_fitness = float('-inf')
-                    if attempt == MAX_RECONNECTION_ATTEMPTS - 1:
-                        print(f"Failed to evaluate fitness after {MAX_RECONNECTION_ATTEMPTS} attempts: {e}")
-                
-            # Ensure raw_fitness is initialized if somehow it's still None
-            if program.raw_fitness is None:
-                program.raw_fitness = float('-inf')
-                
-            # Calculate fitness with parsimony pressure
-            program.fitness = program.raw_fitness - program.parimony_coefficient * len(program.program)
+                        raw_fitness = float('-inf')
+                        break # Failed to recreate session
+
+                sharpe = result.get('sharpe')
+                raw_fitness = sharpe if sharpe is not None else float('-inf')
+                break # Success
+
+            except Exception as e:
+                error_message = str(e).lower()
+                if "401" in error_message or "authentication" in error_message:
+                    # Authentication error, attempt to reconnect
+                    reconnected = False
+                    with self._session_lock:
+                       # Double check session status before attempting recreation
+                        try:
+                            test_response = self.session.get('https://api.worldquantbrain.com/authentication')
+                            if test_response.status_code != 200:
+                                reconnected = self._recreate_session()
+                            else:
+                                reconnected = True
+                        except requests.exceptions.RequestException:
+                            reconnected = self._recreate_session()
+
+                    if reconnected:
+                        continue # Retry metric call
+
+                # For other errors or failed reconnection, assign -inf and maybe log
+                raw_fitness = float('-inf')
+                if attempt == MAX_RECONNECTION_ATTEMPTS - 1:
+                    print(f"Failed to evaluate fitness for program after {MAX_RECONNECTION_ATTEMPTS} attempts: {e}")
+                # Consider breaking here unless it was an auth error we might recover from on retry
+                # For simplicity, we break on any exception after checking auth
+                break
+
+
+        # Calculate final fitness with parsimony pressure
+        fitness = raw_fitness - program.parimony_coefficient * len(program.program)
+
+        return raw_fitness, fitness, needs_evaluation_increment
+
+
+    def _evaluate_fitness(self, program):
+        """Evaluate the fitness of a program (sequential wrapper)."""
+        raw_fitness, fitness, increment = self._evaluate_single_program(program)
+
+        # Update program state if it was evaluated now
+        if increment:
+            program.raw_fitness = raw_fitness
+            program.fitness = fitness
             self.fitness_evaluations += 1
-            
-        return program.fitness
+
+        return program.fitness # Return the fitness value
+
+    def parallel_evaluate_fitness(self, programs_to_evaluate, n_parallel=3):
+        """
+        Evaluate the fitness of multiple programs in parallel.
+
+        Parameters
+        ----------
+        programs_to_evaluate : list
+            A list of Program objects to evaluate.
+        n_parallel : int, optional
+            Number of parallel workers (default is 3, max is 3).
+
+        Returns
+        -------
+        list
+            The list of programs with their fitness attributes updated.
+        """
+        if n_parallel > 3:
+            warnings.warn(
+                f"Requested n_parallel={n_parallel} exceeds the limit of 3. Capping at 3.",
+                UserWarning,
+                stacklevel=2
+            )
+            n_parallel = 3
+        elif n_parallel <= 0:
+            raise ValueError("n_parallel must be positive.")
+
+        if not programs_to_evaluate:
+            return []
+
+        total_evaluations_increment = 0
+        
+        BATCH_SIZE = 50 # Using batch processing for better throughput
+        TIMEOUT_PER_PROGRAM = 10  # seconds
+        
+        for batch in batched(programs_to_evaluate, BATCH_SIZE):
+            with concurrent.futures.ThreadPoolExecutor(max_workers=n_parallel) as executor:
+                # Submit batch of tasks
+                future_to_program = {executor.submit(self._evaluate_single_program, p): p for p in batch}
+                
+                # Process completed futures with timeout
+                timeout = TIMEOUT_PER_PROGRAM * len(batch) / n_parallel
+                
+                try:
+                    for future in concurrent.futures.as_completed(future_to_program, timeout=timeout):
+                        program = future_to_program[future]
+                        try:
+                            raw_fitness, fitness, increment = future.result()
+                            # Update program state directly
+                            program.raw_fitness = raw_fitness
+                            program.fitness = fitness
+                            if increment:
+                                total_evaluations_increment += 1
+                        except Exception as exc:
+                            print(f'{program!r} generated an exception: {exc}')
+                            # Handle failed evaluations
+                            program.raw_fitness = float('-inf')
+                            program.fitness = float('-inf')
+                except concurrent.futures.TimeoutError:
+                    print("Timeout reached while evaluating batch. Some programs might not have been evaluated.")
+                    # Mark incomplete programs with -inf fitness
+                    for future, program in future_to_program.items():
+                        if not future.done():
+                            program.raw_fitness = float('-inf')
+                            program.fitness = float('-inf')
+
+        # Update the global counter after all batches are done
+        self.fitness_evaluations += total_evaluations_increment
+
+        # Final check for any programs without fitness values
+        for p in programs_to_evaluate:
+            if p.fitness is None:
+                p.raw_fitness = float('-inf')
+                p.fitness = float('-inf')
+
+        return programs_to_evaluate
     
     def _tournament_selection(self):
-        """Select an individual using tournament selection."""
+        """Select an individual using tournament selection. Assumes fitness is pre-calculated."""
         indices = self.random_state.randint(0, len(self.population), self.tournament_size)
         tournament = [self.population[i] for i in indices]
         
-        # Return the best individual in the tournament
-        return max(tournament, key=lambda program: self._evaluate_fitness(program))
+        # Return the best individual in the tournament based on pre-calculated fitness
+        # Handle potential None fitness values gracefully if evaluation failed.
+        return max(tournament, key=lambda program: program.fitness if program.fitness is not None else float('-inf'))
     
     def _update_best(self):
-        """Update the best program seen so far."""
-        current_best = max(self.population, key=lambda program: self._evaluate_fitness(program))
-        current_best_fitness = self._evaluate_fitness(current_best)
+        """Update the best program seen so far. Assumes fitness is pre-calculated."""
+        # Find the best program based on the pre-calculated fitness
+        current_best = max(self.population, key=lambda program: program.fitness if program.fitness is not None else float('-inf'))
+        current_best_fitness = current_best.fitness if current_best.fitness is not None else float('-inf')
         
         if current_best_fitness > self.best_fitness:
             self.best_fitness = current_best_fitness
@@ -211,6 +347,9 @@ class GPLearnSimulator:
         """
         if not self.population:
             self._initialize_population()
+            # Evaluate fitness of the initial population
+            self.parallel_evaluate_fitness(self.population, self.n_parallel)
+            self._update_best() # Initial best based on initial population
             
         self.start_time = time.time()
         
@@ -220,8 +359,8 @@ class GPLearnSimulator:
             # Create a new generation
             new_population = []
             
-            # Elite selection - keep the best individual
-            elite = max(self.population, key=lambda program: self._evaluate_fitness(program))
+            # Elite selection - keep the best individual (fitness already calculated)
+            elite = max(self.population, key=lambda program: program.fitness if program.fitness is not None else float('-inf'))
             new_population.append(elite)
             
             # Fill the rest of the population
@@ -293,15 +432,20 @@ class GPLearnSimulator:
             # Replace the old population
             self.population = new_population
             
-            # Update tracking information
+            # Evaluate fitness for the new generation in parallel (or sequentially if n_parallel=1)
+            self.parallel_evaluate_fitness(self.population, self.n_parallel)
+            
+            # Update tracking information using pre-calculated fitness
             self._update_best()
             
             # Store generation statistics
+            valid_fitnesses = [p.fitness for p in self.population if p.fitness is not None]
+            avg_fitness = np.mean(valid_fitnesses) if valid_fitnesses else float('-inf')
             generation_stats = {
                 'generation': gen,
                 'best_fitness': self.best_fitness,
-                'avg_fitness': np.mean([self._evaluate_fitness(p) for p in self.population]),
-                'best_length': len(self.best_program.program),
+                'avg_fitness': avg_fitness, # Use pre-calculated fitness
+                'best_length': len(self.best_program.program) if self.best_program else 0, # Handle case where best_program might not be set yet
                 'avg_length': np.mean([len(p.program) for p in self.population]),
                 'fitness_evaluations': self.fitness_evaluations,
                 'elapsed_time': time.time() - self.start_time
@@ -321,8 +465,8 @@ class GPLearnSimulator:
                       f"Elapsed: {timedelta(seconds=int(elapsed))} | "
                       f"Remaining: {timedelta(seconds=int(remaining))}")
         
-        # Final update
-        self._update_best()
+        # Final update using last generation's fitness
+        # No need to call _update_best() again as it was called after the last parallel_evaluate_fitness
         
         if verbose:
             print(f"\nEvolution completed in {timedelta(seconds=int(time.time() - self.start_time))}")
