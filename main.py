@@ -42,12 +42,13 @@ def main():
     from src.genetic import GPLearnSimulator
     simulator = GPLearnSimulator(
         session=s,
-        population_size = 20,
-        generations = 10,
-        tournament_size = 3,
+        population_size = 40,
+        generations = 20,
+        tournament_size = 5,
         p_crossover = 0.7,
         p_mutation = 0.1,
         p_subtree_mutation = 0.05,
+        parsimony_coefficient = 0.1,
         )
     simulator.evolve()
 

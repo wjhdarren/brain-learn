@@ -166,6 +166,10 @@ class GPLearnSimulator:
                     if attempt == MAX_RECONNECTION_ATTEMPTS - 1:
                         print(f"Failed to evaluate fitness after {MAX_RECONNECTION_ATTEMPTS} attempts: {e}")
                 
+            # Ensure raw_fitness is initialized if somehow it's still None
+            if program.raw_fitness is None:
+                program.raw_fitness = float('-inf')
+                
             # Calculate fitness with parsimony pressure
             program.fitness = program.raw_fitness - program.parimony_coefficient * len(program.program)
             self.fitness_evaluations += 1

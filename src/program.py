@@ -614,11 +614,13 @@ class Program:
         return deepcopy(self.program), []
     
     @staticmethod
-    def create_from_list(program : list[Operator | Terminal]):
+    def create_from_list(program : list[Operator | Terminal], metric = None):
+        if metric is None:
+            metric = lambda _: 0 # noqa: E731
         return Program(
             max_depth=len(program),
             max_operators=len(program),
-            metric=lambda x: 0,
+            metric=metric,
             random_state=np.random.RandomState(),
             program=program,
         )
