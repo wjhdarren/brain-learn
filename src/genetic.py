@@ -90,7 +90,12 @@ class GPLearnSimulator:
             self.random_state = random_state
             
         # Initialize tracking variables
-        self.population = init_population
+        self.population = [Program(max_depth=self.max_depth,
+                                max_operators=self.max_operators,
+                                random_state=self.random_state,
+                                metric=self.metric,
+                                parimony_coefficient=self.parsimony_coefficient, 
+                                program=program) for program in init_population]
         self.history = []
         self.best_program = None
         self.best_fitness = float('-inf')
@@ -184,8 +189,24 @@ class GPLearnSimulator:
                         raw_fitness = float('-inf')
                         break # Failed to recreate session
 
-                sharpe = result.get('sharpe')
-                raw_fitness = sharpe if sharpe is not None else float('-inf')
+                fitness = result.get('fitness')
+                raw_fitness = fitness if fitness is not None else float('-inf')
+                # Append program to initial-population.pkl if thresholds are met
+                try:
+                    if ((result.get('LOW_SHARPE') == 'PASS' and result.get('LOW_FITNESS') == 'PASS' and result.get('LOW_TURNOVER') == 'PASS' and result.get('HIGH_TURNOVER') == 'PASS')
+                        or (result.get('sharpe', 0) > 1.7)
+                        or (result.get('fitness', 0) >= 1.1)):
+                        import dill
+                        try:
+                            with open('initial-population.pkl', 'rb') as f:
+                                population = dill.load(f)
+                        except (FileNotFoundError, EOFError):
+                            population = []
+                        population.append(program.program)
+                        with open('initial-population.pkl', 'wb') as f:
+                            dill.dump(population, f)
+                except Exception as e:
+                    print(f"Error appending program to initial-population.pkl: {e}")
                 break # Success
 
             except Exception as e:
@@ -206,6 +227,13 @@ class GPLearnSimulator:
 
                     if reconnected:
                         continue # Retry metric call
+                elif "429" in error_message or "simulation_limit_exceeded" in error_message:
+                    # Rate limiting error, wait and retry
+                    print("Rate limit exceeded. Waiting before retry...")
+                    # Wait with exponential backoff
+                    wait_time = 2 ** attempt  # Exponential backoff: 1, 2, 4, 8, 16 seconds
+                    time.sleep(wait_time)
+                    continue  # Retry after waiting
 
                 # For other errors or failed reconnection, assign -inf and maybe log
                 raw_fitness = float('-inf')
@@ -266,9 +294,9 @@ class GPLearnSimulator:
         total_evaluations_increment = 0
         
         BATCH_SIZE = 50 # Using batch processing for better throughput
-        TIMEOUT_PER_PROGRAM = 10  # seconds
+        TIMEOUT_PER_PROGRAM = 180  # seconds
         
-        for batch in batched(programs_to_evaluate, BATCH_SIZE):
+        for batch_idx, batch in enumerate(batched(programs_to_evaluate, BATCH_SIZE)):
             with concurrent.futures.ThreadPoolExecutor(max_workers=n_parallel) as executor:
                 # Submit batch of tasks
                 future_to_program = {executor.submit(self._evaluate_single_program, p): p for p in batch}
@@ -298,6 +326,15 @@ class GPLearnSimulator:
                         if not future.done():
                             program.raw_fitness = float('-inf')
                             program.fitness = float('-inf')
+            
+            # Add a delay between batches to help prevent rate limiting
+            # Only add delay if there are more batches to process
+            if batch_idx < len(list(batched(programs_to_evaluate, BATCH_SIZE))) - 1:
+                # Wait between batches to avoid hitting rate limits
+                # The delay increases with each batch to help with rate limiting
+                batch_delay = 5 + batch_idx  # 5, 6, 7, ... seconds
+                print(f"Waiting {batch_delay} seconds before processing next batch to avoid rate limits...")
+                time.sleep(batch_delay)
 
         # Update the global counter after all batches are done
         self.fitness_evaluations += total_evaluations_increment

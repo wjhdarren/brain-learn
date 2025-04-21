@@ -2,6 +2,11 @@ import os
 from dotenv import load_dotenv
 import requests
 import sys
+from src.function import *
+from time import time
+import dill
+
+
 
 def create_session():
     """Create and authenticate a new session."""
@@ -38,17 +43,21 @@ def main():
         print("Exiting due to authentication failure.")
         return
     
+    INIT_POP_LIST = dill.load(open('initial-population.pkl', 'rb'))
+    
     # Run the GPLearn simulator
     from src.genetic import GPLearnSimulator
     simulator = GPLearnSimulator(
         session=s,
         population_size = 40,
-        generations = 20,
+        generations = 40,
         tournament_size = 5,
         p_crossover = 0.7,
         p_mutation = 0.1,
         p_subtree_mutation = 0.05,
-        parsimony_coefficient = 0.1,
+        parsimony_coefficient = 0.03,
+        random_state = int(time()),
+        init_population = INIT_POP_LIST
         )
     simulator.evolve()
 

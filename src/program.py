@@ -2,6 +2,8 @@ from src.function import * # noqa: F403
 import numpy as np
 from numpy.random import RandomState
 from copy import deepcopy
+from sympy import Integer as Int
+import sympy as sp
 
 class Program:
     def __init__(
@@ -11,7 +13,7 @@ class Program:
         random_state : RandomState,
         metric : callable,
         parimony_coefficient : float = 0.1,
-        p_point_replace : float = 0.1,
+        p_point_replace : float = 0.12,
         program : list[Operator | Terminal] = None,
         skip_validation : bool = False, # for debug usage
     ):
@@ -84,6 +86,65 @@ class Program:
                 raise ValueError(f'Invalid program structure: expected 1 final unit but got {len(stack)}')
             
         return self._unit  
+            
+    def normalize_program(self, program, random_state):
+        """Normalize the program to ensure the final expression has unit Int(1).
+        
+        This function analyzes the unit of the program and if it's not Int(1),
+        applies a normalization operator that guarantees unit Int(1) output.
+        
+        Parameters
+        ----------
+        program : list
+            The program to normalize.
+        random_state : RandomState
+            Random state for probabilistic choices.
+            
+        Returns
+        -------
+        list
+            Normalized program with unit Int(1).
+        """
+        # First check the current unit of the program
+        temp_program = self.program
+        self.program = program
+        
+        try:
+            # Get the unit of the final expression
+            units = self.unit
+            final_unit = units[-1] if units else None
+            
+            # Only apply normalization if the unit is not already 1
+            if final_unit != Int(1):
+                # Choose a normalizer from the available options that guarantee unit Int(1)
+                normalizer_options = [RANK, ZSCORE, TSZ_21, SURPRISE]
+                # Weight the choices based on their expected effectiveness
+                weights = [0.3, 0.3, 0.2, 0.2]  # Higher weights for RANK and ZSCORE
+                
+                # Choose normalizer based on weights
+                idx = random_state.choice(len(normalizer_options), p=weights)
+                normalizer = normalizer_options[idx]
+                
+                # Apply the chosen normalizer
+                program = program + [normalizer]
+                
+                # Validate the normalized program
+                self.program = program
+                if not self.validate_program():
+                    # If normalization fails, try RANK as a fallback
+                    program = temp_program + [RANK]
+                    self.program = program
+                    if not self.validate_program():
+                        # If still failing, revert to original program
+                        program = temp_program
+        except Exception:
+            # If any error occurs, revert to original program
+            program = temp_program
+        finally:
+            # Restore the original program
+            self.program = temp_program
+            
+        return program
             
     def build_program(self, random_state):
         """Build a random program tree in postfix notation.
@@ -172,6 +233,8 @@ class Program:
                 
                 # Check if the program is valid
                 if self.validate_program():
+                    # Normalize the program to ensure unit Int(1)
+                    program = self.normalize_program(program, random_state)
                     return program
                 
                 # Restore original program if validation fails
@@ -194,6 +257,8 @@ class Program:
                     temp_program = self.program
                     self.program = program
                     if self.validate_program():
+                        # Normalize the program to ensure unit Int(1)
+                        program = self.normalize_program(program, random_state)
                         return program
                     self.program = temp_program
             except Exception:
@@ -201,7 +266,11 @@ class Program:
                 
         # Last resort fallback to a single terminal
         terminal = weighted_choice(self.terminal_set)
-        return [terminal]
+        program = [terminal]
+        
+        # Try to normalize even this simple program
+        program = self.normalize_program(program, random_state)
+        return program
 
     def validate_program(self):
         """Validate that the embedded program in the object is valid.
@@ -316,12 +385,34 @@ class Program:
         return len(self.program)
 
     def raw_fitness(self):
-        fast_expr = self.__str__()
+        # First check if the final unit is Int(1)
+        units = self.unit
+        final_unit = units[-1] if units else None
+        
+        # If the unit is not Int(1), normalize the program
+        if final_unit != Int(1):
+            # Create a normalized version of the program
+            normalized_program = self.normalize_program(self.program, self.random_state)
+            
+            # Temporarily save the original program
+            original_program = self.program
+            self.program = normalized_program
+            
+            # Get the string representation of the normalized program
+            fast_expr = self.__str__()
+            
+            # Restore the original program
+            self.program = original_program
+        else:
+            # Unit is already Int(1), get the string representation
+            fast_expr = self.__str__()
+        
+        # Evaluate the expression
         try:
-            sharpe = self.metric(fast_expr)['sharpe']
-            if sharpe is None:
+            fitness = self.metric(fast_expr)['fitness']
+            if fitness is None:
                 return float('-inf')
-            return sharpe
+            return fitness
         except Exception:
             return float('-inf')
 

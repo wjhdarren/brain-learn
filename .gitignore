@@ -15,3 +15,6 @@ wheels/
 
 # Sensitive data
 .env
+*.pkl
+*.pkl.gz
+*.csv
