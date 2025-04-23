@@ -6,8 +6,6 @@ from src.function import *
 from time import time
 import dill
 
-
-
 def create_session():
     """Create and authenticate a new session."""
     # Load credentials from .env file
@@ -49,15 +47,17 @@ def main():
     from src.genetic import GPLearnSimulator
     simulator = GPLearnSimulator(
         session=s,
-        population_size = 40,
-        generations = 40,
-        tournament_size = 5,
-        p_crossover = 0.7,
-        p_mutation = 0.1,
-        p_subtree_mutation = 0.05,
-        parsimony_coefficient = 0.03,
-        random_state = int(time()),
-        init_population = INIT_POP_LIST
+        population_size = 100,
+        generations = 100,
+        tournament_size = 3,
+        p_crossover = 0.6,
+        p_mutation = 0.15,
+        p_subtree_mutation = 0.1,
+        parsimony_coefficient = 0.02,
+        random_state = int(time()/1000),
+        #init_population = INIT_POP_LIST
+        max_depth = 5,
+        max_operators = 6,
         )
     simulator.evolve()
 

@@ -119,7 +119,7 @@ class Program:
                 # Choose a normalizer from the available options that guarantee unit Int(1)
                 normalizer_options = [RANK, ZSCORE, TSZ_21, SURPRISE]
                 # Weight the choices based on their expected effectiveness
-                weights = [0.3, 0.3, 0.2, 0.2]  # Higher weights for RANK and ZSCORE
+                weights = [0.2, 0.3, 0.25, 0.25]  # Higher weights for RANK and ZSCORE
                 
                 # Choose normalizer based on weights
                 idx = random_state.choice(len(normalizer_options), p=weights)
@@ -309,6 +309,11 @@ class Program:
                 unit_operands = []
                 for _ in range(node.arity):
                     unit_operands.insert(0, unit_stack.pop())
+                
+                # For binary operators, check that terminals are not the same (except MUL)
+                if node.arity == 2 and isinstance(operands[0], Terminal) and isinstance(operands[1], Terminal):
+                    if operands[0] == operands[1] and node.name != 'mul':
+                        return False
                 
                 # Check if the unit rule can be applied successfully
                 try:

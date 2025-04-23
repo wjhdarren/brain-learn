@@ -509,7 +509,7 @@ class GPLearnSimulator:
             print(f"\nEvolution completed in {timedelta(seconds=int(time.time() - self.start_time))}")
             print(f"Total fitness evaluations: {self.fitness_evaluations}")
             print(f"Best fitness achieved: {self.best_fitness:.4f}")
-            print(f"Best program length: {len(self.best_program.program)}")
+            print(f"Best program depth: {self.best_program.depth()}")
             
         return self.best_program
     
