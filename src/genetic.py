@@ -11,7 +11,7 @@ import threading
 import warnings
 
 # Maximum number of reconnection attempts
-MAX_RECONNECTION_ATTEMPTS = 3
+MAX_RECONNECTION_ATTEMPTS = 5
 
 class GPLearnSimulator:
     def __init__(self, 
@@ -195,7 +195,7 @@ class GPLearnSimulator:
                 try:
                     if ((result.get('LOW_SHARPE') == 'PASS' and result.get('LOW_FITNESS') == 'PASS' and result.get('LOW_TURNOVER') == 'PASS' and result.get('HIGH_TURNOVER') == 'PASS')
                         or (result.get('sharpe', 0) > 1.7)
-                        or (result.get('fitness', 0) >= 1.1)):
+                        or (result.get('fitness', 0) >= 1.0)):
                         import dill
                         try:
                             with open('initial-population.pkl', 'rb') as f:
@@ -231,7 +231,7 @@ class GPLearnSimulator:
                     # Rate limiting error, wait and retry
                     print("Rate limit exceeded. Waiting before retry...")
                     # Wait with exponential backoff
-                    wait_time = 2 ** attempt  # Exponential backoff: 1, 2, 4, 8, 16 seconds
+                    wait_time = 2 ** (attempt + 1)  # Exponential backoff: 1, 2, 4, 8, 16 seconds
                     time.sleep(wait_time)
                     continue  # Retry after waiting
 
