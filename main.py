@@ -57,9 +57,9 @@ def main():
     from src.genetic import GPLearnSimulator
     simulator = GPLearnSimulator(
         session=s,
-        population_size = 100,
-        generations = 100,
-        tournament_size = 3,
+        population_size = 80,
+        generations = 50,
+        tournament_size = 5,
         p_crossover = 0.6,
         p_mutation = 0.15,
         p_subtree_mutation = 0.1,

@@ -2,6 +2,166 @@ import requests
 from time import sleep
 import pandas as pd
 from datetime import datetime
+import os
+import threading
+from functools import wraps
+
+# Global lock for thread-safe CSV operations
+_csv_lock = threading.Lock()
+
+def thread_safe_csv(func):
+    """Decorator to make any CSV operation thread-safe."""
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        with _csv_lock:
+            return func(*args, **kwargs)
+    return wrapper
+
+@thread_safe_csv
+def save_alpha_to_csv(alpha_performance, logger=None):
+    """
+    Save alpha performance data to CSV in a thread-safe manner using pandas.
+    Always saves to 'simulation_results.csv' in the root directory.
+    
+    Parameters
+    ----------
+    alpha_performance : dict
+        Dictionary containing alpha performance metrics
+    logger : Logger, optional
+        Logger instance for logging messages
+    """
+    if not alpha_performance:
+        return
+    
+    csv_path = "simulation_results.csv"
+    
+    # Add timestamp to the performance data
+    alpha_performance = alpha_performance.copy()  # Create a copy to avoid modifying the original
+    alpha_performance['date'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    
+    try:
+        # Convert single record to DataFrame
+        df_new = pd.DataFrame([alpha_performance])
+        
+        # Check if file exists and append or create new
+        if os.path.exists(csv_path):
+            # Append to existing file without writing headers
+            df_new.to_csv(csv_path, mode='a', header=False, index=False)
+        else:
+            # Create new file with headers
+            df_new.to_csv(csv_path, index=False)
+            
+        success_msg = f"Alpha data saved to {csv_path}"
+        if logger:
+            logger.log(success_msg)
+        else:
+            print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] {success_msg}")
+            
+    except Exception as e:
+        error_msg = f"Failed to write to CSV file: {e}"
+        if logger:
+            logger.error(error_msg)
+        else:
+            print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] {error_msg}")
+
+@thread_safe_csv
+def read_simulations_csv(csv_path="simulations.csv", filter_criteria=None, sort_by=None, logger=None):
+    """
+    Read simulation data from CSV in a thread-safe manner.
+    
+    Parameters
+    ----------
+    csv_path : str, optional
+        Path to the CSV file (default is "simulations.csv")
+    filter_criteria : dict, optional
+        Dictionary of {column: value} pairs to filter the data
+        Example: {'sharpe': 1.5} will return only rows where sharpe >= 1.5
+    sort_by : tuple or str, optional
+        Column name(s) to sort by, can be a string or tuple of (column, ascending)
+        Example: 'fitness' or ('fitness', False) for descending order
+    logger : Logger, optional
+        Logger instance for logging messages
+        
+    Returns
+    -------
+    pandas.DataFrame
+        DataFrame containing simulation results, or empty DataFrame if file doesn't exist
+    """
+    try:
+        if not os.path.exists(csv_path):
+            if logger:
+                logger.warning(f"CSV file not found: {csv_path}")
+            else:
+                print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Warning: CSV file not found: {csv_path}")
+            return pd.DataFrame()
+        
+        # Read the CSV file
+        df = pd.read_csv(csv_path)
+        
+        # Apply filtering if criteria provided
+        if filter_criteria and isinstance(filter_criteria, dict):
+            for column, value in filter_criteria.items():
+                if column in df.columns:
+                    # For numeric columns, use >= comparison
+                    if pd.api.types.is_numeric_dtype(df[column]):
+                        df = df[df[column] >= value]
+                    else:  # For non-numeric columns, use equality
+                        df = df[df[column] == value]
+        
+        # Apply sorting if specified
+        if sort_by:
+            if isinstance(sort_by, tuple):
+                column, ascending = sort_by
+                df = df.sort_values(by=column, ascending=ascending)
+            else:
+                df = df.sort_values(by=sort_by, ascending=False)  # Default to descending for metrics like fitness/sharpe
+        
+        return df
+        
+    except Exception as e:
+        error_msg = f"Error reading CSV file: {e}"
+        if logger:
+            logger.error(error_msg)
+        else:
+            print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Error: {error_msg}")
+        return pd.DataFrame()
+
+@thread_safe_csv
+def get_best_simulations(csv_path="simulations.csv", metric='fitness', top_n=10, min_threshold=None, logger=None):
+    """
+    Get the best simulations from the CSV file based on a specified metric.
+    
+    Parameters
+    ----------
+    csv_path : str, optional
+        Path to the CSV file (default is "simulations.csv")
+    metric : str, optional
+        Metric to sort by (default is 'fitness')
+    top_n : int, optional
+        Number of top simulations to return (default is 10)
+    min_threshold : float, optional
+        Minimum value for the metric to be included (default is None)
+    logger : Logger, optional
+        Logger instance for logging messages
+        
+    Returns
+    -------
+    pandas.DataFrame
+        DataFrame containing the top simulations
+    """
+    # Set up filter criteria if threshold provided
+    filter_criteria = {metric: min_threshold} if min_threshold is not None else None
+    
+    # Read and sort the data
+    df = read_simulations_csv(
+        csv_path=csv_path,
+        filter_criteria=filter_criteria,
+        sort_by=(metric, False),  # Sort in descending order
+        logger=logger
+    )
+    
+    # Return top N rows (or all if less than N)
+    return df.head(top_n) if not df.empty else df
 
 def get_alpha_performance(s : requests.Session, alpha_id : str):
     alpha = s.get("https://api.worldquantbrain.com/alphas/" + alpha_id)
@@ -104,8 +264,10 @@ def simulate(s : requests.Session, fast_expr : str, timeout = 300, logger = None
     
     if logger:
         logger.log("Simulation sent successfully.")
+        logger.log(f"Expression: {fast_expr}")
     else:
         print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Simulation sent successfully.")
+        print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Expression: {fast_expr}")
     
     simulation_progress_url = simulation_response.headers['Location']
     finished = False
@@ -148,6 +310,10 @@ def simulate(s : requests.Session, fast_expr : str, timeout = 300, logger = None
             alpha_id = simulation_progress.json()["alpha"] 
             alpha_performance = get_alpha_performance(s, alpha_id)
             if alpha_performance:
+                # Save the performance data to CSV
+                save_alpha_to_csv(alpha_performance, logger=logger)
+                # Add the expression to the returned alpha_performance object for reference
+                alpha_performance['expression'] = fast_expr
                 return alpha_performance
             return None
         except Exception as e:

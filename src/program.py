@@ -160,8 +160,8 @@ class Program:
             The flattened tree representation of the program in postfix notation.
         """
         max_attempts = 50  # Maximum number of attempts to build a valid program
-        max_depth = int(2/3*self.max_depth)
-        max_operators = int(2/3*self.max_operators)
+        max_depth = self.max_depth
+        max_operators = self.max_operators
         
         def weighted_choice(options, weights=None):
             """Helper function for weighted random choice."""
@@ -184,8 +184,8 @@ class Program:
                 remaining_operators = max_operators
                 
             # Determine if we should use a terminal or operator
-            # Probability of using a terminal increases with depth and decreases with remaining operators
-            p_terminal = 0.1 + 0.7 * min(1.0, depth / max_depth)
+            # Probability of using a terminal increases exponentially with depth
+            p_terminal = 0.1 + 0.9 * (1 - np.exp(-2.0 * depth / max_depth))
             
             # Force operators for the first few levels to ensure some complexity
             if depth < min_depth:
@@ -234,7 +234,7 @@ class Program:
                 # Check if the program is valid
                 if self.validate_program():
                     # Normalize the program to ensure unit Int(1)
-                    program = self.normalize_program(program, random_state)
+                    # program = self.normalize_program(program, random_state)
                     return program
                 
                 # Restore original program if validation fails
@@ -258,7 +258,7 @@ class Program:
                     self.program = program
                     if self.validate_program():
                         # Normalize the program to ensure unit Int(1)
-                        program = self.normalize_program(program, random_state)
+                        # program = self.normalize_program(program, random_state)
                         return program
                     self.program = temp_program
             except Exception:
@@ -269,7 +269,7 @@ class Program:
         program = [terminal]
         
         # Try to normalize even this simple program
-        program = self.normalize_program(program, random_state)
+        # program = self.normalize_program(program, random_state)
         return program
 
     def validate_program(self):
