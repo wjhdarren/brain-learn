@@ -5,8 +5,9 @@ import sys
 from src.function import *
 from time import time
 import dill
+from src.logger import Logger
 
-def create_session():
+def create_session(logger):
     """Create and authenticate a new session."""
     # Load credentials from .env file
     load_dotenv()
@@ -14,8 +15,8 @@ def create_session():
     password = os.getenv("PASSWORD")
     
     if not username or not password:
-        print("Error: USERNAME or PASSWORD environment variables not set.")
-        print("Please check your .env file.")
+        logger.error("USERNAME or PASSWORD environment variables not set.")
+        logger.error("Please check your .env file.")
         sys.exit(1)
     
     # Create a new session
@@ -26,19 +27,28 @@ def create_session():
     response = s.post('https://api.worldquantbrain.com/authentication')
     
     if response.status_code == 201:
-        print("Authentication successful.")
+        logger.log("Authentication successful.")
         return s
     else:
-        print("Failed to authenticate.")
-        print("Status Code:", response.status_code)
-        print("Response:", response.text)
+        logger.error("Failed to authenticate.")
+        logger.error(f"Status Code: {response.status_code}")
+        logger.error(f"Response: {response.text}")
         return None
 
 def main():
+    # Initialize logger
+    logger = Logger(
+        job_name="brain-learn",
+        console_log=True,
+        file_log=True,
+        logs_directory="logs",
+        incremental_run_number=True
+    )
+    
     # Create and authenticate the session
-    s = create_session()
+    s = create_session(logger)
     if not s:
-        print("Exiting due to authentication failure.")
+        logger.error("Exiting due to authentication failure.")
         return
     
     INIT_POP_LIST = dill.load(open('initial-population.pkl', 'rb'))
@@ -58,6 +68,7 @@ def main():
         #init_population = INIT_POP_LIST
         max_depth = 5,
         max_operators = 6,
+        logger=logger
         )
     simulator.evolve()
 

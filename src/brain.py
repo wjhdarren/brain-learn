@@ -31,7 +31,7 @@ def get_alpha_performance(s : requests.Session, alpha_id : str):
     return alpha_performance
 
 
-def simulate(s : requests.Session, fast_expr : str, timeout = 300) -> dict | None:
+def simulate(s : requests.Session, fast_expr : str, timeout = 300, logger = None) -> dict | None:
     simulation_data = {
     'type': 'REGULAR',
     'settings': {
@@ -56,36 +56,57 @@ def simulate(s : requests.Session, fast_expr : str, timeout = 300) -> dict | Non
     for retry in range(MAX_RETRIES):
         simulation_response = s.post('https://api.worldquantbrain.com/simulations', json=simulation_data)
         
-        # Check for rate limiting (429 status code)
         if simulation_response.status_code == 429:
             error_message = simulation_response.text
             if "SIMULATION_LIMIT_EXCEEDED" in error_message:
-                # Calculate exponential backoff wait time
-                wait_time = 2 ** retry  # 1, 2, 4, 8, 16 seconds
-                print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Rate limit exceeded. Waiting {wait_time} seconds before retry {retry+1}/{MAX_RETRIES}...")
+                wait_time = 2 ** (retry + 1)  # 1, 2, 4, 8, 16 seconds
+                log_msg = f"Rate limit exceeded. Waiting {wait_time} seconds before retry {retry+1}/{MAX_RETRIES}..."
+                if logger:
+                    logger.warning(log_msg)
+                else:
+                    print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] {log_msg}")
                 sleep(wait_time)
-                continue  # Retry after waiting
+                continue  
             else:
-                print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Failed to send simulation. Status code:", simulation_response.status_code)
-                print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Response:", simulation_response.text)
+                log_msg1 = f"Failed to send simulation. Status code: {simulation_response.status_code}"
+                log_msg2 = f"Response: {simulation_response.text}"
+                if logger:
+                    logger.error(log_msg1)
+                    logger.error(log_msg2)
+                else:
+                    print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] {log_msg1}")
+                    print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] {log_msg2}")
                 return None
         
-        # Check for authentication failures (401 status code)
         if simulation_response.status_code == 401:
-            print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Authentication error: Incorrect credentials.")
-            print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Response:", simulation_response.text)
+            log_msg1 = "Authentication error: Incorrect credentials."
+            log_msg2 = f"Response: {simulation_response.text}"
+            if logger:
+                logger.error(log_msg1)
+                logger.error(log_msg2)
+            else:
+                print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] {log_msg1}")
+                print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] {log_msg2}")
             return None
         
-        # If we get here, we have a valid response
         break
     
-    # If we've exhausted all retries, return None
     if simulation_response.status_code != 201:
-        print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Failed to send simulation after {MAX_RETRIES} retries. Status code:", simulation_response.status_code)
-        print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Response:", simulation_response.text)
+        log_msg1 = f"Failed to send simulation after {MAX_RETRIES} retries. Status code: {simulation_response.status_code}"
+        log_msg2 = f"Response: {simulation_response.text}"
+        if logger:
+            logger.error(log_msg1)
+            logger.error(log_msg2)
+        else:
+            print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] {log_msg1}")
+            print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] {log_msg2}")
         return None
     
-    print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Simulation sent successfully.")
+    if logger:
+        logger.log("Simulation sent successfully.")
+    else:
+        print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Simulation sent successfully.")
+    
     simulation_progress_url = simulation_response.headers['Location']
     finished = False
     total_wait_time = 0
@@ -93,26 +114,31 @@ def simulate(s : requests.Session, fast_expr : str, timeout = 300) -> dict | Non
     while not finished and total_wait_time < timeout:
         simulation_progress = s.get(simulation_progress_url)
         
-        # Check for authentication failures during progress monitoring
         if simulation_progress.status_code == 401:
-            print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Authentication error during simulation progress monitoring.")
-            print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Response:", simulation_progress.text)
+            log_msg1 = "Authentication error during simulation progress monitoring."
+            log_msg2 = f"Response: {simulation_progress.text}"
+            if logger:
+                logger.error(log_msg1)
+                logger.error(log_msg2)
+            else:
+                print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] {log_msg1}")
+                print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] {log_msg2}")
             return None
         
-        # Check if simulation is complete
         if simulation_progress.headers.get("Retry-After", 0) == 0:
             finished = True
             break
             
-        # Calculate wait time from header
         wait_time = float(simulation_progress.headers["Retry-After"])
         
-        # Update total wait time
         total_wait_time += wait_time
         
-        # Check if next wait would exceed timeout
         if total_wait_time >= timeout:
-            print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Timeout of {timeout} seconds will be exceeded. Aborting.")
+            log_msg = f"Timeout of {timeout} seconds will be exceeded. Aborting."
+            if logger:
+                logger.warning(log_msg)
+            else:
+                print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] {log_msg}")
             return None
             
         sleep(wait_time)
@@ -121,15 +147,22 @@ def simulate(s : requests.Session, fast_expr : str, timeout = 300) -> dict | Non
         try:
             alpha_id = simulation_progress.json()["alpha"] 
             alpha_performance = get_alpha_performance(s, alpha_id)
-            # Check if we got a valid result
             if alpha_performance:
                 return alpha_performance
             return None
         except Exception as e:
-            print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Error processing completed simulation: {e}")
+            log_msg = f"Error processing completed simulation: {e}"
+            if logger:
+                logger.error(log_msg)
+            else:
+                print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] {log_msg}")
             return None
     else:
-        print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Simulation timed out after {total_wait_time} seconds")
+        log_msg = f"Simulation timed out after {total_wait_time} seconds"
+        if logger:
+            logger.warning(log_msg)
+        else:
+            print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] {log_msg}")
         return None
     
 def get_alpha_history(s : requests.Session, pandas = True):

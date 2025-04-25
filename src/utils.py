@@ -3,11 +3,11 @@ from sympy import Integer as Int
 from src.brain import simulate
 from functools import partial
 
-def evaluate_fitness(s : requests.Session):
-    return partial(simulate, s)
+def evaluate_fitness(s: requests.Session, logger=None):
+    return partial(simulate, s, logger=logger)
 
 
-def help_check_same(x : Int, y : Int) -> bool:
+def help_check_same(x: Int, y: Int) -> bool:
     if x == y:
         return x
     else:

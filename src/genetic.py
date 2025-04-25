@@ -29,7 +29,8 @@ class GPLearnSimulator:
                  random_state=None,
                  parsimony_coefficient=0.15,
                  n_parallel=3,
-                 init_population=[]):
+                 init_population=[],
+                 logger=None):
         """
         A Genetic Programming simulator optimized for simulation-based fitness evaluation.
         
@@ -65,6 +66,8 @@ class GPLearnSimulator:
             Number of parallel workers for fitness evaluation (default is 1). Max is 3.
         init_population : list, optional
             List of Program objects to initialize the population with.
+        logger : Logger, optional
+            Logger instance for logging messages.
         """
         self.population_size = population_size
         self.generations = generations
@@ -77,9 +80,10 @@ class GPLearnSimulator:
         self.max_depth = max_depth
         self.max_operators = max_operators
         self.session = session
-        self.metric = evaluate_fitness(session)
+        self.metric = evaluate_fitness(session, logger=logger)
         self.parsimony_coefficient = parsimony_coefficient
         self.n_parallel = n_parallel
+        self.logger = logger
         
         # Setup random state
         if random_state is None:
@@ -139,13 +143,20 @@ class GPLearnSimulator:
         response = self.session.post('https://api.worldquantbrain.com/authentication')
         
         if response.status_code == 201:
-            print("Session reconnected successfully.")
+            if self.logger:
+                self.logger.log("Session reconnected successfully.")
+            else:
+                print("Session reconnected successfully.")
             # Update the metric function with the new session
-            self.metric = evaluate_fitness(self.session)
+            self.metric = evaluate_fitness(self.session, logger=self.logger)
             return True
         else:
-            print(f"Failed to reconnect session. Status Code: {response.status_code}")
-            print(f"Response: {response.text}")
+            if self.logger:
+                self.logger.error(f"Failed to reconnect session. Status Code: {response.status_code}")
+                self.logger.error(f"Response: {response.text}")
+            else:
+                print(f"Failed to reconnect session. Status Code: {response.status_code}")
+                print(f"Response: {response.text}")
             return False
     
     def _evaluate_single_program(self, program):
@@ -206,7 +217,10 @@ class GPLearnSimulator:
                         with open('initial-population.pkl', 'wb') as f:
                             dill.dump(population, f)
                 except Exception as e:
-                    print(f"Error appending program to initial-population.pkl: {e}")
+                    if self.logger:
+                        self.logger.error(f"Error appending program to initial-population.pkl: {e}")
+                    else:
+                        print(f"Error appending program to initial-population.pkl: {e}")
                 break # Success
 
             except Exception as e:
@@ -229,7 +243,10 @@ class GPLearnSimulator:
                         continue # Retry metric call
                 elif "429" in error_message or "simulation_limit_exceeded" in error_message:
                     # Rate limiting error, wait and retry
-                    print("Rate limit exceeded. Waiting before retry...")
+                    if self.logger:
+                        self.logger.warning("Rate limit exceeded. Waiting before retry...")
+                    else:
+                        print("Rate limit exceeded. Waiting before retry...")
                     # Wait with exponential backoff
                     wait_time = 2 ** (attempt + 1)  # Exponential backoff: 1, 2, 4, 8, 16 seconds
                     time.sleep(wait_time)
@@ -238,7 +255,10 @@ class GPLearnSimulator:
                 # For other errors or failed reconnection, assign -inf and maybe log
                 raw_fitness = float('-inf')
                 if attempt == MAX_RECONNECTION_ATTEMPTS - 1:
-                    print(f"Failed to evaluate fitness for program after {MAX_RECONNECTION_ATTEMPTS} attempts: {e}")
+                    if self.logger:
+                        self.logger.error(f"Failed to evaluate fitness for program after {MAX_RECONNECTION_ATTEMPTS} attempts: {e}")
+                    else:
+                        print(f"Failed to evaluate fitness for program after {MAX_RECONNECTION_ATTEMPTS} attempts: {e}")
                 # Consider breaking here unless it was an auth error we might recover from on retry
                 # For simplicity, we break on any exception after checking auth
                 break
@@ -315,12 +335,18 @@ class GPLearnSimulator:
                             if increment:
                                 total_evaluations_increment += 1
                         except Exception as exc:
-                            print(f'{program!r} generated an exception: {exc}')
+                            if self.logger:
+                                self.logger.error(f'{program!r} generated an exception: {exc}')
+                            else:
+                                print(f'{program!r} generated an exception: {exc}')
                             # Handle failed evaluations
                             program.raw_fitness = float('-inf')
                             program.fitness = float('-inf')
                 except concurrent.futures.TimeoutError:
-                    print("Timeout reached while evaluating batch. Some programs might not have been evaluated.")
+                    if self.logger:
+                        self.logger.warning("Timeout reached while evaluating batch. Some programs might not have been evaluated.")
+                    else:
+                        print("Timeout reached while evaluating batch. Some programs might not have been evaluated.")
                     # Mark incomplete programs with -inf fitness
                     for future, program in future_to_program.items():
                         if not future.done():
@@ -333,7 +359,10 @@ class GPLearnSimulator:
                 # Wait between batches to avoid hitting rate limits
                 # The delay increases with each batch to help with rate limiting
                 batch_delay = 5 + batch_idx  # 5, 6, 7, ... seconds
-                print(f"Waiting {batch_delay} seconds before processing next batch to avoid rate limits...")
+                if self.logger:
+                    self.logger.log(f"Waiting {batch_delay} seconds before processing next batch to avoid rate limits...")
+                else:
+                    print(f"Waiting {batch_delay} seconds before processing next batch to avoid rate limits...")
                 time.sleep(batch_delay)
 
         # Update the global counter after all batches are done
@@ -495,21 +524,34 @@ class GPLearnSimulator:
                 elapsed = time.time() - self.start_time
                 remaining = (elapsed / (gen + 1)) * (self.generations - gen - 1)
                 
-                print(f"Generation {gen+1}/{self.generations} | "
+                log_message = (f"Generation {gen+1}/{self.generations} | "
                       f"Best Fitness: {self.best_fitness:.4f} | "
                       f"Avg Fitness: {generation_stats['avg_fitness']:.4f} | "
                       f"Best Length: {generation_stats['best_length']} | "
                       f"Elapsed: {timedelta(seconds=int(elapsed))} | "
                       f"Remaining: {timedelta(seconds=int(remaining))}")
+                
+                if self.logger:
+                    self.logger.log(log_message)
+                else:
+                    print(log_message)
         
         # Final update using last generation's fitness
         # No need to call _update_best() again as it was called after the last parallel_evaluate_fitness
         
         if verbose:
-            print(f"\nEvolution completed in {timedelta(seconds=int(time.time() - self.start_time))}")
-            print(f"Total fitness evaluations: {self.fitness_evaluations}")
-            print(f"Best fitness achieved: {self.best_fitness:.4f}")
-            print(f"Best program depth: {self.best_program.depth()}")
+            final_stats = [
+                f"\nEvolution completed in {timedelta(seconds=int(time.time() - self.start_time))}",
+                f"Total fitness evaluations: {self.fitness_evaluations}",
+                f"Best fitness achieved: {self.best_fitness:.4f}",
+                f"Best program depth: {self.best_program.depth()}"
+            ]
+            
+            for stat in final_stats:
+                if self.logger:
+                    self.logger.log(stat)
+                else:
+                    print(stat)
             
         return self.best_program
     
