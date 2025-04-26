@@ -433,7 +433,7 @@ class Program:
         random_state : RandomState instance
             The random number generator.
 
-        program : list, optional (default=None)
+        program : list or Program, optional (default=None)
             The flattened tree representation of the program. If None, the
             embedded tree in the object will be used.
 
@@ -444,6 +444,10 @@ class Program:
         """
         if program is None:
             program = self.program
+        
+        # If program is a Program object, get its program attribute
+        if isinstance(program, Program):
+            program = program.program
         
         if not program:  # Handle empty programs
             return 0, 0
@@ -513,7 +517,7 @@ class Program:
             Indices of nodes removed from the donor program.
         """
         # Maximum attempts to find a valid crossover
-        max_attempts = 10
+        max_attempts = 30
         if random_state is None:
             random_state = self.random_state
             
@@ -601,7 +605,7 @@ class Program:
             The indices of nodes that were removed from the original program.
         """
         # Maximum attempts to find a valid mutation
-        max_attempts = 10
+        max_attempts = 30
         
         if random_state is None:
             random_state = self.random_state
@@ -664,7 +668,7 @@ class Program:
             Indices of nodes that were mutated.
         """
         # Maximum attempts to find a valid mutation
-        max_attempts = 10
+        max_attempts = 30
         if random_state is None:
             random_state = self.random_state
         
@@ -724,5 +728,8 @@ class Program:
     depth_ = property(depth)
     operator_count_ = property(operator_count)
     length_ = property(length)  
+    
+    def __len__(self):
+        return self.length_
     
     

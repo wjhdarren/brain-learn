@@ -65,103 +65,59 @@ def save_alpha_to_csv(alpha_performance, logger=None):
             print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] {error_msg}")
 
 @thread_safe_csv
-def read_simulations_csv(csv_path="simulations.csv", filter_criteria=None, sort_by=None, logger=None):
+def read_simulations_csv(csv_path="simulations.csv"):
     """
-    Read simulation data from CSV in a thread-safe manner.
-    
+    Read simulation data from CSV in a thread-safe manner. Ensures a standard
+    set of columns is present in the output DataFrame.
+
     Parameters
     ----------
     csv_path : str, optional
         Path to the CSV file (default is "simulations.csv")
     filter_criteria : dict, optional
-        Dictionary of {column: value} pairs to filter the data
+        Dictionary of {column: value} pairs to filter the data.
+        For numeric columns, filters rows where column >= value.
+        For non-numeric columns, filters rows where column == value.
         Example: {'sharpe': 1.5} will return only rows where sharpe >= 1.5
     sort_by : tuple or str, optional
-        Column name(s) to sort by, can be a string or tuple of (column, ascending)
-        Example: 'fitness' or ('fitness', False) for descending order
-    logger : Logger, optional
-        Logger instance for logging messages
-        
+        Column name(s) to sort by. Can be a string (column name, descending order)
+        or a tuple (column_name, ascending_bool).
+        Example: 'fitness' or ('fitness', False) for descending order.
+
     Returns
     -------
     pandas.DataFrame
-        DataFrame containing simulation results, or empty DataFrame if file doesn't exist
+        DataFrame containing simulation results, potentially reindexed and filtered/sorted.
+        Returns an empty DataFrame with standard columns if the file doesn't exist or an error occurs.
     """
+    EXPECTED_COLUMNS = [
+        'alpha_id', 'regular_code', 'turnover', 'returns', 'drawdown', 'margin', 
+        'fitness', 'sharpe', 'LOW_SHARPE', 'LOW_FITNESS', 'LOW_TURNOVER', 
+        'HIGH_TURNOVER', 'CONCENTRATED_WEIGHT', 'LOW_SUB_UNIVERSE_SHARPE', 
+        'SELF_CORRELATION', 'MATCHES_COMPETITION', 'datetime'
+    ]
+    
+    empty_df = pd.DataFrame(columns=EXPECTED_COLUMNS)
+
     try:
         if not os.path.exists(csv_path):
-            if logger:
-                logger.warning(f"CSV file not found: {csv_path}")
-            else:
-                print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Warning: CSV file not found: {csv_path}")
-            return pd.DataFrame()
-        
-        # Read the CSV file
-        df = pd.read_csv(csv_path)
-        
-        # Apply filtering if criteria provided
-        if filter_criteria and isinstance(filter_criteria, dict):
-            for column, value in filter_criteria.items():
-                if column in df.columns:
-                    # For numeric columns, use >= comparison
-                    if pd.api.types.is_numeric_dtype(df[column]):
-                        df = df[df[column] >= value]
-                    else:  # For non-numeric columns, use equality
-                        df = df[df[column] == value]
-        
-        # Apply sorting if specified
-        if sort_by:
-            if isinstance(sort_by, tuple):
-                column, ascending = sort_by
-                df = df.sort_values(by=column, ascending=ascending)
-            else:
-                df = df.sort_values(by=sort_by, ascending=False)  # Default to descending for metrics like fitness/sharpe
-        
-        return df
-        
-    except Exception as e:
-        error_msg = f"Error reading CSV file: {e}"
-        if logger:
-            logger.error(error_msg)
-        else:
-            print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Error: {error_msg}")
-        return pd.DataFrame()
+            print(f"Warning: CSV file not found: {csv_path}")
+            return empty_df
 
-@thread_safe_csv
-def get_best_simulations(csv_path="simulations.csv", metric='fitness', top_n=10, min_threshold=None, logger=None):
-    """
-    Get the best simulations from the CSV file based on a specified metric.
-    
-    Parameters
-    ----------
-    csv_path : str, optional
-        Path to the CSV file (default is "simulations.csv")
-    metric : str, optional
-        Metric to sort by (default is 'fitness')
-    top_n : int, optional
-        Number of top simulations to return (default is 10)
-    min_threshold : float, optional
-        Minimum value for the metric to be included (default is None)
-    logger : Logger, optional
-        Logger instance for logging messages
-        
-    Returns
-    -------
-    pandas.DataFrame
-        DataFrame containing the top simulations
-    """
-    # Set up filter criteria if threshold provided
-    filter_criteria = {metric: min_threshold} if min_threshold is not None else None
-    
-    # Read and sort the data
-    df = read_simulations_csv(
-        csv_path=csv_path,
-        filter_criteria=filter_criteria,
-        sort_by=(metric, False),  # Sort in descending order
-        logger=logger
-    )
-    
-    # Return top N rows (or all if less than N)
-    return df.head(top_n) if not df.empty else df
+        df = pd.read_csv(csv_path, header=None)
+        df.columns = EXPECTED_COLUMNS
+        df['datetime'] = pd.to_datetime(df['datetime'])
+
+        return df
+
+    except pd.errors.EmptyDataError:
+        print(f"Warning: CSV file is empty: {csv_path}")
+        return empty_df
+    except Exception as e:
+        error_msg = f"Error reading or processing CSV file '{csv_path}': {e}"
+        print(f" Error: {error_msg}")
+        # Return empty DataFrame with standard columns on error
+        return empty_df
 
 def get_alpha_performance(s : requests.Session, alpha_id : str):
     alpha = s.get("https://api.worldquantbrain.com/alphas/" + alpha_id)
