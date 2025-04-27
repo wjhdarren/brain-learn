@@ -217,13 +217,7 @@ class GPLearnSimulator:
 
         # Skip if already evaluated
         if program_str in self.evaluated_expressions:
-            if self.logger:
-                self.logger.log(f"Skipping already evaluated: {program_str[:50]}...")
             return program_str, None
-
-        # Log evaluation start
-        if self.logger:
-            self.logger.log(f"Evaluating: {program_str[:50]}...")
 
         # Try to evaluate with reconnection attempts if needed
         result = None
@@ -308,7 +302,7 @@ class GPLearnSimulator:
             result['final_fitness'] = program.fitness
             
             if self.logger:
-                self.logger.log(f"Evaluated: {program_str[:50]}... Fitness: {program.fitness:.4f}")
+                self.logger.log(f"Program fitness: {program_str[:50]}... = {program.fitness:.4f}")
 
             # Update Hall of Fame if result meets threshold
             if self._meets_hof_threshold(result):
@@ -351,8 +345,6 @@ class GPLearnSimulator:
             # Save back to file
             with open('initial-population.pkl', 'wb') as f:
                 pickle.dump(existing_data, f)
-            if self.logger:
-                self.logger.log(f"Saved program with fitness {fitness:.4f} to init-population.pkl")
 
         except Exception as e:
             if self.logger:
@@ -386,12 +378,10 @@ class GPLearnSimulator:
             # If already evaluated, fitness should be set elsewhere
 
         if not to_evaluate:
-            if self.logger:
-                self.logger.log("All programs in batch already evaluated.")
             return
 
         if self.logger:
-            self.logger.log(f"Evaluating {len(to_evaluate)} new programs in parallel (pool size {n_parallel})...")
+            self.logger.log(f"Evaluating {len(to_evaluate)} programs (pool size {n_parallel})...")
 
         start_time = time.time()
 
@@ -419,10 +409,10 @@ class GPLearnSimulator:
 
         duration = time.time() - start_time
         if self.logger:
-            self.logger.log(f"Batch evaluation finished in {duration:.2f}s")
-            if self.hall_of_fame:
+            self.logger.log(f"Batch evaluation completed in {duration:.2f}s")
+            if self.hall_of_fame and len(self.hall_of_fame) > 0:
                 best_hof = max(f[0] for f in self.hall_of_fame)
-                self.logger.log(f"HOF size: {len(self.hall_of_fame)}, Best: {best_hof:.4f}")
+                self.logger.log(f"HOF: {len(self.hall_of_fame)} entries, best={best_hof:.4f}")
 
 
     def _tournament_selection(self):
@@ -463,7 +453,7 @@ class GPLearnSimulator:
 
         # Initial evaluation of the starting population
         if self.logger:
-            self.logger.log(f"Starting initial evaluation of {len(self.population)} programs...")
+            self.logger.log(f"Initial evaluation of {len(self.population)} programs...")
         # Ensure all initial programs are evaluated and HOF is populated
         needs_evaluation = [p for p in self.population if p.fitness is None]
         self.parallel_evaluate_fitness(needs_evaluation)
@@ -484,8 +474,8 @@ class GPLearnSimulator:
                 best_str = str(self.best_program)
                 next_population.append(self.best_program)
                 next_gen_strings.add(best_str)
-                if self.logger:
-                    self.logger.log(f"Added elite program: {best_str[:50]}... (Fitness: {self.best_fitness:.4f})")
+                if self.logger and gen % log_interval == 0:
+                    self.logger.log(f"Elite: {best_str[:50]}... (Fitness: {self.best_fitness:.4f})")
 
             # Generate new population through crossover and mutation
             while len(next_population) < self.population_size:
@@ -592,13 +582,13 @@ class GPLearnSimulator:
             if verbose and (gen % log_interval == 0 or gen == self.generations):
                 elapsed_time = timedelta(seconds=int(end_gen_time - self.start_time))
                 self.logger.log(
-                    f"Generation {gen:>{len(str(self.generations))}}: "
-                    f"BestFitness={self.best_fitness:.4f}, "
-                    f"AvgFitness={avg_fitness:.4f}, "
-                    f"HOF BestFit={best_hof_fitness:.4f} (Size:{len(self.hall_of_fame)}), "
+                    f"Gen {gen:>{len(str(self.generations))}}: "
+                    f"Best={self.best_fitness:.4f}, "
+                    f"Avg={avg_fitness:.4f}, "
+                    f"HOF Best={best_hof_fitness:.4f} (Size:{len(self.hall_of_fame)}), "
                     f"Evals={self.fitness_evaluations}, "
-                    f"GenTime={gen_duration:.2f}s, "
-                    f"Elapsed={elapsed_time}"
+                    f"Time={gen_duration:.2f}s, "
+                    f"Total={elapsed_time}"
                 )
         
         return self.best_program

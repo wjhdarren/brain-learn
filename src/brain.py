@@ -51,12 +51,6 @@ def save_alpha_to_csv(alpha_performance, logger=None):
             # Create new file with headers
             df_new.to_csv(csv_path, index=False)
             
-        success_msg = f"Alpha data saved to {csv_path}"
-        if logger:
-            logger.log(success_msg)
-        else:
-            print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] {success_msg}")
-            
     except Exception as e:
         error_msg = f"Failed to write to CSV file: {e}"
         if logger:
@@ -219,11 +213,9 @@ def simulate(s : requests.Session, fast_expr : str, timeout = 300, logger = None
         return None
     
     if logger:
-        logger.log("Simulation sent successfully.")
-        logger.log(f"Expression: {fast_expr}")
+        logger.log(f"Simulation sent successfully: {fast_expr}")
     else:
-        print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Simulation sent successfully.")
-        print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Expression: {fast_expr}")
+        print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Simulation sent successfully: {fast_expr}")
     
     simulation_progress_url = simulation_response.headers['Location']
     finished = False
