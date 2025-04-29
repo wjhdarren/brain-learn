@@ -147,11 +147,11 @@ def simulate(s : requests.Session, fast_expr : str, timeout = 300, logger = None
     'settings': {
         'instrumentType': 'EQUITY',
         'region': 'USA',
-        'universe': 'TOP3000',
+        'universe': 'TOP1000',
         'delay': 1,
         'decay': 1,
         'neutralization': 'INDUSTRY',
-        'truncation': 0.1,
+        'truncation': 0.08,
         'pasteurization': 'ON',
         'unitHandling': 'VERIFY',
         'nanHandling': 'OFF',

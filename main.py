@@ -51,7 +51,7 @@ def main():
         logger.error("Exiting due to authentication failure.")
         return
     
-    INIT_POP_LIST = dill.load(open('initial-population.pkl', 'rb'))
+    # INIT_POP_LIST = dill.load(open('initial-population.pkl', 'rb'))
     
     # Run the GPLearn simulator
     from src.genetic import GPLearnSimulator
